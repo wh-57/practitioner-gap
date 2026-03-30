@@ -1,0 +1,16 @@
+# API keys
+api_key.txt
+*.env
+
+# Data
+pilot/data/
+*.pdf
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
