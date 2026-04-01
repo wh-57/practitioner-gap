@@ -6,8 +6,10 @@ import json
 import time
 import re
 import os
+import threading
 from pathlib import Path
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 os.chdir(r"C:\Users\willi\Desktop\gap\src")
 
@@ -20,11 +22,9 @@ PDF_DIR.mkdir(exist_ok=True)
 
 client = anthropic.Anthropic(api_key=API_KEY)
 
-# Bump from 8000 to fix JSON truncation on citation-heavy papers
-MAX_TOKENS = 16000
-
-# Send full text for documents under this character count
+MAX_TOKENS           = 16000
 FULL_TEXT_CHAR_LIMIT = 60000
+MAX_WORKERS          = 2    # concurrent PDFs — raise to 5 if no rate limit errors
 
 
 # %% PDF text extraction
@@ -35,8 +35,7 @@ def extract_pdf_text(pdf_path: Path) -> str:
     full_text = "\n".join(pages)
 
     if len(full_text) <= FULL_TEXT_CHAR_LIMIT:
-        print(f"  Full text ({len(full_text)} chars)")
-        return full_text
+        return full_text, "full"
 
     ref_markers = [
         "references and further reading",
@@ -55,12 +54,24 @@ def extract_pdf_text(pdf_path: Path) -> str:
 
     if ref_start is not None:
         text = full_text[:6000] + "\n\n[...body truncated...]\n\n" + full_text[ref_start:]
-        print(f"  Refs section at {ref_start} ({len(text)} chars total)")
+        return text, f"refs@{ref_start}"
     else:
         text = full_text[:8000] + "\n\n[...middle truncated...]\n\n" + full_text[-4000:]
-        print(f"  No refs section — first+last ({len(text)} chars)")
+        return text, "first+last"
 
-    return text
+
+# %% Infer source_type from subfolder
+def infer_source_type(pdf_path: Path) -> str:
+    folder = pdf_path.parent.name.lower()
+    if "aqr_alt" in folder or "alternative" in folder:
+        return "aqr_alternative_thinking"
+    if "faj" in folder:
+        return "faj_article"
+    if "jpm" in folder:
+        return "jpm_article"
+    if "aqr_white" in folder or "white" in folder:
+        return "aqr_white_paper"
+    return "other_practitioner"
 
 
 # %% Extraction prompt
@@ -73,9 +84,6 @@ PART 1 — SOURCE DOCUMENT METADATA
 ════════════════════════════════════════
 - title: full document title
 - year: publication year as integer (null if not found)
-- source_type: type of document — ONE of:
-    "aqr_alternative_thinking", "faj_article", "jpm_article",
-    "aqr_white_paper", "other_practitioner"
 - source_topic: primary investment topic — ONE of:
     "factor_investing", "portfolio_construction", "risk_management",
     "behavioral_finance", "macro_finance", "market_efficiency",
@@ -138,7 +146,7 @@ GUIDANCE:
 - He-Krishnamurthy → "financial_intermediation"
 - NBER/SSRN working papers → is_academic: true, venue_type: "working_paper"
 - Ilmanen "Expected Returns" → "not_academic", venue_type: "book"
-- DOI: only if you see it in the reference string. Never fabricate.
+- DOI: only if you see it explicitly. Never fabricate.
 - If the same work appears multiple times, include it only ONCE.
 
 Output ONLY valid JSON. No preamble, no markdown fences.
@@ -147,14 +155,13 @@ Output ONLY valid JSON. No preamble, no markdown fences.
   "source": {
     "title": "...",
     "year": 2024,
-    "source_type": "aqr_alternative_thinking",
     "source_topic": "...",
     "source_academic_subfield": "..."
   },
   "citations": [
     {
       "raw_mention": "...",
-      "raw_authors": "...",
+      "raw_authors": ["..."],
       "recovered_authors": ["..."],
       "recovered_title": "...",
       "recovered_year": 2020,
@@ -176,90 +183,106 @@ Document text:
 {text}"""
 
 
-# %% LLM extraction
-def extract_all(pdf_path: Path) -> tuple[dict, list[dict]]:
-    """Single Claude call per PDF. Returns (source_meta, citations_list)."""
-    text = extract_pdf_text(pdf_path)
+# %% Single PDF processing function (runs in thread)
+def process_pdf(pdf_path: Path) -> tuple[str, dict, list[dict], str]:
+    path_str    = str(pdf_path)
+    source_type = infer_source_type(pdf_path)
+    text, strategy = extract_pdf_text(pdf_path)
     prompt = EXTRACTION_PROMPT.replace("{text}", text)
 
-    try:
-        message = client.messages.create(
-            model="claude-sonnet-4-5",
-            max_tokens=MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        raw = message.content[0].text.strip()
-        raw = re.sub(r"^```json\s*", "", raw)
-        raw = re.sub(r"\s*```$",     "", raw)
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=MAX_TOKENS,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw = message.content[0].text.strip()
+            raw = re.sub(r"^```json\s*", "", raw)
+            raw = re.sub(r"\s*```$",     "", raw)
 
-        result    = json.loads(raw)
-        source    = result.get("source", {})
-        citations = result.get("citations", [])
+            result    = json.loads(raw)
+            source    = result.get("source", {})
+            citations = result.get("citations", [])
 
-        if not source.get("title"):
-            source["title"] = pdf_path.stem
+            if not source.get("title"):
+                source["title"] = pdf_path.stem
+            source["source_type"] = source_type
 
-        return source, citations
+            status = (f"OK | {source.get('title', '')[:45]} ({source.get('year')}) "
+                      f"| {len(citations)} citations | {strategy}")
+            return path_str, source, citations, status
 
-    except json.JSONDecodeError as e:
-        print(f"  JSON parse error: {e}")
-        print(f"  Raw output (first 400 chars): {raw[:400]}")
-        return {"title": pdf_path.stem, "year": None,
-                "source_type": None, "source_topic": None,
-                "source_academic_subfield": None}, []
-    except Exception as e:
-        print(f"  API error: {e}")
-        return {"title": pdf_path.stem, "year": None,
-                "source_type": None, "source_topic": None,
-                "source_academic_subfield": None}, []
+        except anthropic.RateLimitError:
+            wait = 30 * (attempt + 1)   # 30s, 60s, 90s, 120s, 150s
+            print(f"  Rate limit — waiting {wait}s (attempt {attempt+1}/{max_retries})")
+            time.sleep(wait)
+            continue
+
+        except json.JSONDecodeError as e:
+            source = {"title": pdf_path.stem, "year": None,
+                      "source_type": source_type, "source_topic": None,
+                      "source_academic_subfield": None}
+            return path_str, source, [], f"JSON_ERROR: {e}"
+
+        except Exception as e:
+            source = {"title": pdf_path.stem, "year": None,
+                      "source_type": source_type, "source_topic": None,
+                      "source_academic_subfield": None}
+            return path_str, source, [], f"API_ERROR: {e}"
+
+    # All retries exhausted
+    source = {"title": pdf_path.stem, "year": None,
+              "source_type": source_type, "source_topic": None,
+              "source_academic_subfield": None}
+    return path_str, source, [], "FAILED: max retries exceeded"
 
 
-# %% Main pipeline
+# %% Main pipeline (parallel)
 def run_pipeline(pdf_dir: Path, output_name: str = "citations.csv") -> pd.DataFrame:
     """
-    Process all PDFs in pdf_dir.
-    Saves incrementally to avoid losing progress on large runs.
+    Process all PDFs recursively under pdf_dir using a thread pool.
+    MAX_WORKERS PDFs are processed concurrently.
+    Saves incrementally after each completed batch.
     """
-    pdf_files = sorted(pdf_dir.glob("*.pdf"))
+    pdf_files = sorted(pdf_dir.glob("**/*.pdf"))
+
     if not pdf_files:
-        print(f"No PDFs found in {pdf_dir}")
+        print(f"No PDFs found under {pdf_dir}")
         return pd.DataFrame()
 
     out_path = DATA_DIR / output_name
 
-    # Resume support: skip already-processed files
-    processed_titles = set()
+    # Resume: track already-processed file paths
+    processed_paths = set()
+    all_citations   = []
+    save_lock       = threading.Lock()
+
     if out_path.exists():
         existing = pd.read_csv(out_path)
-        processed_titles = set(existing["source_title"].dropna().unique())
-        print(f"Resuming — {len(processed_titles)} source titles already processed")
+        if "source_file" in existing.columns:
+            processed_paths = set(existing["source_file"].dropna().unique())
         all_citations = existing.to_dict("records")
-    else:
-        all_citations = []
+        print(f"Resuming — {len(processed_paths)} files already processed")
 
-    print(f"Found {len(pdf_files)} PDFs total\n")
+    pending = [p for p in pdf_files if str(p) not in processed_paths]
+    subfolders = sorted(set(p.parent.name for p in pdf_files))
+    print(f"Found {len(pdf_files)} PDFs across subfolders: {subfolders}")
+    print(f"Pending: {len(pending)} | Workers: {MAX_WORKERS}\n")
 
-    for i, pdf_path in enumerate(pdf_files):
-        source_check, _ = {"title": pdf_path.stem}, []
+    if not pending:
+        print("All PDFs already processed.")
+        return pd.DataFrame(all_citations)
 
-        # Quick title check — skip if already done
-        # (We do a lightweight metadata-only check via filename stem first)
-        print(f"[{i+1}/{len(pdf_files)}] {pdf_path.name}")
+    completed = 0
 
-        source, citations = extract_all(pdf_path)
-
-        if source.get("title") in processed_titles:
-            print(f"  Skipping — already processed")
-            continue
-
-        print(f"  Source : {source.get('title')} ({source.get('year')})")
-        print(f"  Type   : {source.get('source_type')}")
-        print(f"  Topic  : {source.get('source_topic')} | "
-              f"Subfield: {source.get('source_academic_subfield')}")
-        print(f"  Found  : {len(citations)} citations")
-
+    def save_result(path_str, source, citations):
+        """Thread-safe save after each completed PDF."""
+        rows = []
         for c in citations:
             row = {
+                "source_file":              path_str,
                 "source_year":              source.get("year"),
                 "source_title":             source.get("title"),
                 "source_type":              source.get("source_type"),
@@ -267,18 +290,33 @@ def run_pipeline(pdf_dir: Path, output_name: str = "citations.csv") -> pd.DataFr
                 "source_academic_subfield": source.get("source_academic_subfield"),
             }
             row.update(c)
-            all_citations.append(row)
+            rows.append(row)
 
-        # Save after every PDF — protects against interruptions
-        pd.DataFrame(all_citations).to_csv(out_path, index=False)
+        with save_lock:
+            all_citations.extend(rows)
+            pd.DataFrame(all_citations).to_csv(out_path, index=False)
 
-        processed_titles.add(source.get("title"))
-        time.sleep(1)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {executor.submit(process_pdf, p): p for p in pending}
+
+        for future in as_completed(futures):
+            completed += 1
+            pdf_path = futures[future]
+
+            try:
+                path_str, source, citations, status = future.result()
+            except Exception as e:
+                print(f"[{completed}/{len(pending)}] THREAD ERROR {pdf_path.name}: {e}")
+                continue
+
+            print(f"[{completed}/{len(pending)}] {pdf_path.name}")
+            print(f"  {status}")
+
+            save_result(path_str, source, citations)
 
     df = pd.DataFrame(all_citations)
     print(f"\n{'='*55}")
-    print(f"Total PDFs processed : {len(pdf_files)}")
-    print(f"Total citations      : {len(df)}")
+    print(f"Total PDFs : {len(pdf_files)} | Citations: {len(df)}")
     return df
 
 
@@ -320,18 +358,37 @@ def print_summary(df: pd.DataFrame):
     print("\nCitations per source year:")
     print(df.groupby("source_year").size().sort_index().to_string())
 
-    print("\nAcademic vs non-academic by year (excl. AQR internal):")
-    sub = df[~df["is_aqr_internal"]]
-    print(sub.groupby(["source_year", "is_academic"]).size()
+    print("\nSource type breakdown by year:")
+    print(df.groupby(["source_year", "source_type"]).size()
             .unstack(fill_value=0).to_string())
+
+    print("\nTop 15 cited authors:")
+    authors = []
+    for val in df["recovered_authors"].dropna():
+        try:
+            parsed = json.loads(val) if isinstance(val, str) else val
+            if isinstance(parsed, list):
+                authors.extend(parsed)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    for author, count in Counter(authors).most_common(15):
+        print(f"  {author}: {count}")
 
 
 # %% RUN
 # ---------------------------------------------------------------
-# Place all practitioner PDFs in:  src/data/pdfs/
-# Supports resume — safe to interrupt and restart.
+# Subfolder structure inside src/data/pdfs/:
+#   AQR_alternative/   ← AQR Alternative Thinking PDFs
+#   FAJ/               ← Financial Analysts Journal PDFs (summer)
+#   JPM/               ← Journal of Portfolio Management PDFs (summer)
+#   AQR_white/         ← AQR White Papers (optional)
+#
+# MAX_WORKERS=4 runs 4 PDFs simultaneously.
+# If you hit rate limit errors, reduce to 3.
+# For the full 200-400 paper corpus, consider the Anthropic Batch API instead.
 # ---------------------------------------------------------------
 
 df = run_pipeline(PDF_DIR, output_name="citations.csv")
 if not df.empty:
     print_summary(df)
+
