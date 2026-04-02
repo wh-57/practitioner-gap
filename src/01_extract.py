@@ -24,11 +24,11 @@ client = anthropic.Anthropic(api_key=API_KEY)
 
 MAX_TOKENS           = 16000
 FULL_TEXT_CHAR_LIMIT = 60000
-MAX_WORKERS          = 2    # concurrent PDFs — raise to 5 if no rate limit errors
+MAX_WORKERS          = 2    # keep at 2 to avoid rate limit errors
 
 
 # %% PDF text extraction
-def extract_pdf_text(pdf_path: Path) -> str:
+def extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
     doc = fitz.open(pdf_path)
     pages = [page.get_text() for page in doc]
     doc.close()
@@ -122,9 +122,34 @@ QUALITY:
 - confidence: "high", "medium", or "low"
 - resolution_type: "formal_citation", "informal_named", "implicit", or "references_section"
 
-FLAGS:
-- is_academic: true if peer-reviewed journal or academic working paper
-- is_aqr_internal: true if any AQR publication (white paper, working paper, etc.)
+FLAGS — READ CAREFULLY:
+- is_academic: true ONLY if this work was published in the academic finance literature.
+    The criterion is COMMUNITY MEMBERSHIP, not peer review process.
+
+    is_academic = TRUE examples:
+      Journal of Finance, Journal of Financial Economics, Review of Financial Studies,
+      JFQA, Review of Finance, Journal of Corporate Finance, Journal of Financial
+      Intermediation, Management Science (finance papers), American Economic Review,
+      Journal of Political Economy, NBER working papers, SSRN working papers by
+      finance academics, university working papers by finance faculty.
+
+    is_academic = FALSE examples — these are practitioner or hybrid venues even if
+    peer-reviewed:
+      Financial Analysts Journal (FAJ), Journal of Portfolio Management (JPM),
+      Journal of Investment Management, Journal of Alternative Investments,
+      Journal of Fixed Income, Journal of Systematic Investing, Journal of Investing,
+      Journal of Index Investing, AQR White Papers, AQR Alternative Thinking,
+      Bridgewater Daily Observations, any firm white paper, any industry report,
+      any book (even academic-style books like Ilmanen "Expected Returns"),
+      CFA Institute publications, practitioner conference proceedings.
+
+    RULE: if it has a practitioner vibe — written for investors rather than
+    academics, published by a firm or practitioner-facing outlet — mark
+    is_academic = FALSE, even if it cites academic papers or has academic-style
+    methodology.
+
+- is_aqr_internal: true if any AQR publication regardless of format
+    (AQR white paper, AQR working paper, AQR Alternative Thinking, etc.)
 
 CLASSIFICATION:
 - practitioner_topic: ONE of:
@@ -141,12 +166,17 @@ CLASSIFICATION:
     "other_academic"           (international finance, household finance, fintech, econometrics)
     "not_academic"             (practitioner pubs, white papers, books, data sources)
 
-GUIDANCE:
+ADDITIONAL GUIDANCE:
 - ML return prediction → "asset_pricing"
 - He-Krishnamurthy → "financial_intermediation"
-- NBER/SSRN working papers → is_academic: true, venue_type: "working_paper"
-- Ilmanen "Expected Returns" → "not_academic", venue_type: "book"
-- DOI: only if you see it explicitly. Never fabricate.
+- NBER/SSRN working papers by finance faculty → is_academic: true,
+  recovered_venue_type: "working_paper"
+- Ilmanen "Expected Returns" (book) → is_academic: false,
+  recovered_venue_type: "book", academic_subfield: "not_academic"
+- AQR white paper → is_academic: false, is_aqr_internal: true
+- FAJ article → is_academic: false, recovered_venue_type: "journal"
+- JPM article → is_academic: false, recovered_venue_type: "journal"
+- DOI: only if it appears explicitly in the text. Never fabricate.
 - If the same work appears multiple times, include it only ONCE.
 
 Output ONLY valid JSON. No preamble, no markdown fences.
@@ -161,7 +191,7 @@ Output ONLY valid JSON. No preamble, no markdown fences.
   "citations": [
     {
       "raw_mention": "...",
-      "raw_authors": ["..."],
+      "raw_authors": "...",
       "recovered_authors": ["..."],
       "recovered_title": "...",
       "recovered_year": 2020,
@@ -215,7 +245,7 @@ def process_pdf(pdf_path: Path) -> tuple[str, dict, list[dict], str]:
             return path_str, source, citations, status
 
         except anthropic.RateLimitError:
-            wait = 30 * (attempt + 1)   # 30s, 60s, 90s, 120s, 150s
+            wait = 30 * (attempt + 1)
             print(f"  Rate limit — waiting {wait}s (attempt {attempt+1}/{max_retries})")
             time.sleep(wait)
             continue
@@ -232,7 +262,6 @@ def process_pdf(pdf_path: Path) -> tuple[str, dict, list[dict], str]:
                       "source_academic_subfield": None}
             return path_str, source, [], f"API_ERROR: {e}"
 
-    # All retries exhausted
     source = {"title": pdf_path.stem, "year": None,
               "source_type": source_type, "source_topic": None,
               "source_academic_subfield": None}
@@ -243,8 +272,7 @@ def process_pdf(pdf_path: Path) -> tuple[str, dict, list[dict], str]:
 def run_pipeline(pdf_dir: Path, output_name: str = "citations.csv") -> pd.DataFrame:
     """
     Process all PDFs recursively under pdf_dir using a thread pool.
-    MAX_WORKERS PDFs are processed concurrently.
-    Saves incrementally after each completed batch.
+    Saves after every completed PDF. Supports resume.
     """
     pdf_files = sorted(pdf_dir.glob("**/*.pdf"))
 
@@ -252,9 +280,7 @@ def run_pipeline(pdf_dir: Path, output_name: str = "citations.csv") -> pd.DataFr
         print(f"No PDFs found under {pdf_dir}")
         return pd.DataFrame()
 
-    out_path = DATA_DIR / output_name
-
-    # Resume: track already-processed file paths
+    out_path      = DATA_DIR / output_name
     processed_paths = set()
     all_citations   = []
     save_lock       = threading.Lock()
@@ -266,7 +292,7 @@ def run_pipeline(pdf_dir: Path, output_name: str = "citations.csv") -> pd.DataFr
         all_citations = existing.to_dict("records")
         print(f"Resuming — {len(processed_paths)} files already processed")
 
-    pending = [p for p in pdf_files if str(p) not in processed_paths]
+    pending    = [p for p in pdf_files if str(p) not in processed_paths]
     subfolders = sorted(set(p.parent.name for p in pdf_files))
     print(f"Found {len(pdf_files)} PDFs across subfolders: {subfolders}")
     print(f"Pending: {len(pending)} | Workers: {MAX_WORKERS}\n")
@@ -278,7 +304,6 @@ def run_pipeline(pdf_dir: Path, output_name: str = "citations.csv") -> pd.DataFr
     completed = 0
 
     def save_result(path_str, source, citations):
-        """Thread-safe save after each completed PDF."""
         rows = []
         for c in citations:
             row = {
@@ -291,27 +316,22 @@ def run_pipeline(pdf_dir: Path, output_name: str = "citations.csv") -> pd.DataFr
             }
             row.update(c)
             rows.append(row)
-
         with save_lock:
             all_citations.extend(rows)
             pd.DataFrame(all_citations).to_csv(out_path, index=False)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(process_pdf, p): p for p in pending}
-
         for future in as_completed(futures):
             completed += 1
             pdf_path = futures[future]
-
             try:
                 path_str, source, citations, status = future.result()
             except Exception as e:
                 print(f"[{completed}/{len(pending)}] THREAD ERROR {pdf_path.name}: {e}")
                 continue
-
             print(f"[{completed}/{len(pending)}] {pdf_path.name}")
             print(f"  {status}")
-
             save_result(path_str, source, citations)
 
     df = pd.DataFrame(all_citations)
@@ -377,18 +397,16 @@ def print_summary(df: pd.DataFrame):
 
 # %% RUN
 # ---------------------------------------------------------------
-# Subfolder structure inside src/data/pdfs/:
-#   AQR_alternative/   ← AQR Alternative Thinking PDFs
-#   FAJ/               ← Financial Analysts Journal PDFs (summer)
-#   JPM/               ← Journal of Portfolio Management PDFs (summer)
-#   AQR_white/         ← AQR White Papers (optional)
+# Key change from previous version:
+#   is_academic is now defined by COMMUNITY MEMBERSHIP, not peer review.
+#   FAJ, JPM, and other practitioner-hybrid journals are is_academic=FALSE
+#   even though they are peer-reviewed.
+#   Explicit examples in the prompt prevent LLM misclassification.
 #
-# MAX_WORKERS=4 runs 4 PDFs simultaneously.
-# If you hit rate limit errors, reduce to 3.
-# For the full 200-400 paper corpus, consider the Anthropic Batch API instead.
+# Delete citations.csv before running to get a clean reprocess:
+#   del src\data\citations.csv
 # ---------------------------------------------------------------
 
 df = run_pipeline(PDF_DIR, output_name="citations.csv")
 if not df.empty:
     print_summary(df)
-
