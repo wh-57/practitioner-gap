@@ -31,7 +31,9 @@ FULL_TEXT_CHAR_LIMIT = 60000
 MAX_WORKERS          = 2    # default; override with --workers flag
 
 # ── Schema versioning — bump when prompt changes to track schema drift ──────────
-SCHEMA_VERSION = "2.0"
+# 2.2 (Phase 1): adds `extraction_note` doc field + `skipped_likely_scanned`
+#                to the llm_status enum. Paired with 01c_resolve.py schema 2.2.
+SCHEMA_VERSION = "2.2"
 
 
 # ── Provenance (Phase 0) ────────────────────────────────────────────────────────
@@ -472,8 +474,34 @@ def process_file(file_path: Path) -> tuple[str, dict, list[dict], str]:
             "pdf_extraction_method": extraction_method, "schema_version": SCHEMA_VERSION,
             "prompt_hash": PROMPT_HASH, "patterns_hash": PATTERNS_HASH, "code_version": CODE_VERSION,
             "llm_status": "skipped_no_text", "json_valid": None, "retry_count": 0,
+            "extraction_note": None,
         }
         return path_str, source, [], "SKIPPED: no text extracted (likely scanned image)"
+
+    # Patch 12 — skip PDFs flagged likely_scanned (wpp < 50 in extract_pdf_text).
+    # Post-OCR corpus scan (2026-04-20) left 48 such docs across JFI/JOR/MSCI/RA.
+    # Running the LLM on them wastes tokens and produces near-empty citation sets.
+    # Row still lands in documents_deep.csv with llm_status="skipped_likely_scanned"
+    # and extraction_note carrying the wpp value for audit. No citations emitted.
+    # TXT files return extraction_method="html_derived" and are unaffected.
+    if extraction_method == "likely_scanned":
+        wpp = word_count / max(page_count, 1)
+        source = {
+            "title": file_path.stem, "year": None,
+            "source_type": source_type, "source_institution": institution,
+            "doc_id": make_doc_id(file_path),
+            "source_topic": None, "source_academic_subfield": None,
+            "doc_has_bibliography": has_bibliography, "doc_page_count": page_count,
+            "doc_word_count": word_count, "doc_total_chars": total_chars,
+            "doc_text_truncated": text_truncated, "doc_extraction_char_ratio": extraction_char_ratio,
+            "doc_text_strategy": strategy, "doc_ref_section_char": ref_start_char,
+            "source_year_path": source_year_path, "doi_candidates": json.dumps(doi_candidates),
+            "pdf_extraction_method": extraction_method, "schema_version": SCHEMA_VERSION,
+            "prompt_hash": PROMPT_HASH, "patterns_hash": PATTERNS_HASH, "code_version": CODE_VERSION,
+            "llm_status": "skipped_likely_scanned", "json_valid": None, "retry_count": 0,
+            "extraction_note": f"skipped_likely_scanned_wpp_{wpp:.1f}",
+        }
+        return path_str, source, [], f"SKIPPED: likely scanned (wpp={wpp:.1f})"
 
     prompt = EXTRACTION_PROMPT.replace("{text}", text)
 
@@ -518,6 +546,7 @@ def process_file(file_path: Path) -> tuple[str, dict, list[dict], str]:
             source["llm_status"]              = "ok"
             source["json_valid"]              = True
             source["retry_count"]             = retry_count
+            source["extraction_note"]         = None
 
             status = (f"OK | {source.get('title', '')[:45]} ({source.get('year')}) "
                       f"| {len(citations)} citations")
@@ -543,6 +572,7 @@ def process_file(file_path: Path) -> tuple[str, dict, list[dict], str]:
                 "pdf_extraction_method": extraction_method, "schema_version": SCHEMA_VERSION,
                 "prompt_hash": PROMPT_HASH, "patterns_hash": PATTERNS_HASH, "code_version": CODE_VERSION,
                 "llm_status": "json_error", "json_valid": False, "retry_count": retry_count,
+                "extraction_note": None,
             }
             return path_str, source, [], f"JSON_ERROR: {e}"
 
@@ -560,6 +590,7 @@ def process_file(file_path: Path) -> tuple[str, dict, list[dict], str]:
                 "pdf_extraction_method": extraction_method, "schema_version": SCHEMA_VERSION,
                 "prompt_hash": PROMPT_HASH, "patterns_hash": PATTERNS_HASH, "code_version": CODE_VERSION,
                 "llm_status": "api_error", "json_valid": False, "retry_count": retry_count,
+                "extraction_note": None,
             }
             return path_str, source, [], f"API_ERROR: {e}"
 
@@ -576,6 +607,7 @@ def process_file(file_path: Path) -> tuple[str, dict, list[dict], str]:
         "pdf_extraction_method": extraction_method, "schema_version": SCHEMA_VERSION,
         "prompt_hash": PROMPT_HASH, "patterns_hash": PATTERNS_HASH, "code_version": CODE_VERSION,
         "llm_status": "max_retries", "json_valid": False, "retry_count": max_retries,
+        "extraction_note": None,
     }
     return path_str, source, [], "FAILED: max retries exceeded"
 
@@ -680,6 +712,7 @@ def run_pipeline(pdfs_only: bool = False, n: int | None = None, workers: int = M
             "llm_status":                 source.get("llm_status"),
             "json_valid":                 source.get("json_valid"),
             "retry_count":                source.get("retry_count"),
+            "extraction_note":            source.get("extraction_note"),
             "schema_version":             source.get("schema_version"),
             "prompt_hash":                source.get("prompt_hash"),
             "patterns_hash":              source.get("patterns_hash"),
