@@ -1,0 +1,321 @@
+# venues.yaml — journal classification for the is_academic cascade + venue_scope
+# Schema: v2.2 | Phase 1 shadow
+#
+# Lives at: gap/src/post_processing/venues.yaml
+# Consumed by: gap/src/01c_resolve.py  (classify_is_academic, classify_venue_scope)
+#
+# MATCHING POLICY (is_academic)
+#   1. Normalize venue string: lowercase, & -> and, drop parentheticals, strip
+#      volume/issue info, keep only alphanumerics and spaces, collapse
+#      whitespace, strip leading "the".
+#   2. Alias lookup: if normalized string is in `aliases`, replace with
+#      the canonical full name.
+#   3. Ambiguous set: if the normalized string (post-alias) is in
+#      `ambiguous`, return None — defer to LLM.
+#   4. Academic set: True.
+#   5. Practitioner set: False.
+#   6. Working-paper substring: return None — defer to author-network check
+#      (Phase 1.5 once finance-author network is exported from 02_openalex.py).
+#   7. Otherwise: None (unknown) — defer to LLM.
+#
+# MATCHING POLICY (venue_scope — orthogonal to is_academic)
+#   1. Normalize and alias-resolve (same as above).
+#   2. Explicit scope override: if the string matches any `scopes.{name}`
+#      entry, return that scope name.
+#   3. Default by academic/practitioner membership:
+#        in `academic` set     -> "finance_adjacent"
+#        in `practitioner` set -> "finance_practitioner"
+#   4. Otherwise: None.
+#
+# DESIGN NOTE
+#   None is the correct return for "not confidently classified by code."
+#   Do NOT guess. The coalesce step in 01c_resolve.py uses the LLM value
+#   whenever the is_academic code returns None, so over-eager pattern
+#   matching only damages data quality. When in doubt, put the venue in
+#   `ambiguous` or leave it out entirely.
+
+# ─────────────────────────────────────────────────────────────────────── #
+# Academic — is_academic = TRUE
+# ─────────────────────────────────────────────────────────────────────── #
+academic:
+  # Top finance benchmark journals (gap_structure.md)
+  - journal of finance
+  - journal of financial economics
+  - review of financial studies
+  - journal of financial and quantitative analysis
+  - review of finance
+  - journal of corporate finance
+  - journal of financial intermediation
+  - review of asset pricing studies
+  - review of corporate finance studies
+
+  # Seed-only benchmark journals (gap_structure.md)
+  - journal of banking and finance
+  - journal of financial markets
+
+  # Top economics journals (finance papers spill here)
+  - american economic review
+  - quarterly journal of economics
+  - journal of political economy
+  - econometrica
+  - review of economic studies
+  - journal of monetary economics
+  - journal of money credit and banking
+  - economic journal
+  - journal of public economics
+  - journal of economic perspectives
+
+  # Accounting-finance adjacencies
+  - journal of accounting research
+  - journal of accounting and economics
+  - accounting review
+  - review of accounting studies
+  - journal of accounting and public policy
+
+  # Business / management
+  - management science
+  - journal of business
+
+  # Empirical / applied finance academic journals
+  - journal of empirical finance
+  - journal of risk
+  - journal of financial stability
+
+  # Real estate academic journals
+  - journal of real estate finance and economics
+  - real estate economics
+  - journal of property research
+  - journal of property finance
+  - journal of the american real estate and urban economics association
+
+  # Behavioral / psychology (cited in behavioral finance)
+  - journal of clinical psychology
+  - journal of consulting and clinical psychology
+  - journal of consulting psychology
+
+# ─────────────────────────────────────────────────────────────────────── #
+# Practitioner — is_academic = FALSE
+# ─────────────────────────────────────────────────────────────────────── #
+  - journal of econometrics
+  - review of economics and statistics
+  - journal of economic theory
+  - contemporary accounting research
+  - journal of labor economics
+  - journal of risk and uncertainty
+  - european journal of operational research
+  - journal of futures markets
+practitioner:
+  # Practitioner finance journals (per 01_extract_deep.py prompt)
+  - financial analysts journal
+  - journal of portfolio management
+  - journal of investment management
+  - journal of alternative investments
+  - journal of index investing
+  - journal of structured finance
+  - journal of fixed income
+  - journal of investing
+  - journal of wealth management
+  - journal of derivatives
+  - journal of beta investment strategies
+  - journal of asset management
+  - journal of applied corporate finance        # Stern/Wiley — practitioner-hybrid
+  - journal of real estate portfolio management # has "Portfolio Management" — practitioner
+
+  # Firm white paper series
+  - aqr white paper
+  - aqr alternative thinking
+  - aqr capital management
+  - pimco quantitative research
+  - pimco viewpoints
+  - pimco
+  - blackrock investment institute
+  - blackrock
+  - gmo white paper
+  - gmo
+  - research affiliates
+  - ssga insights
+  - state street global advisors
+  - vanguard research
+  - vanguard
+  - vanguard group
+  - man institute
+  - dimensional fund advisors
+  - msci research
+  - msci
+  - alpha architect
+  - two sigma
+  - berkshire hathaway
+  - berkshire hathaway inc annual report
+
+  # Index providers / data vendors
+  - bloomberg
+  - s and p dow jones indices
+  - ftse russell
+
+  # Financial press / business media
+  - wall street journal
+  - new york times
+  - fortune
+
+  # Institutional / policy publications
+  - cfa institute
+  - cfa research foundation
+  - edhec risk institute
+  - edhec business school
+
+  # Other practitioner outlets
+  - credit foncier immobilier
+  - crédit foncier immobilier
+
+# ─────────────────────────────────────────────────────────────────────── #
+# Aliases — abbreviation / short form / variant -> canonical full name
+# Only UNAMBIGUOUS abbreviations. Ambiguous ones go in `ambiguous` below.
+# ─────────────────────────────────────────────────────────────────────── #
+aliases:
+  # Academic
+  jf: journal of finance
+  jfe: journal of financial economics
+  rfs: review of financial studies
+  jfqa: journal of financial and quantitative analysis
+  rof: review of finance
+  jcf: journal of corporate finance
+  raps: review of asset pricing studies
+  rcfs: review of corporate finance studies
+  jbf: journal of banking and finance
+  jfm: journal of financial markets
+  jme: journal of monetary economics
+  jmcb: journal of money credit and banking
+  aer: american economic review
+  qje: quarterly journal of economics
+  jpe: journal of political economy
+  restud: review of economic studies
+  ms: management science
+  jar: journal of accounting research
+  jae: journal of accounting and economics
+  tar: accounting review
+  rast: review of accounting studies
+  jep: journal of economic perspectives
+
+  # Practitioner
+  faj: financial analysts journal
+  jpm: journal of portfolio management
+  jim: journal of investment management
+  jai: journal of alternative investments
+  jii: journal of index investing
+  jsf: journal of structured finance
+  jwm: journal of wealth management
+  jod: journal of derivatives
+  jam: journal of asset management
+
+  # Variant names → canonical entries already in practitioner set
+  cfa institute research foundation: cfa research foundation
+
+# ─────────────────────────────────────────────────────────────────────── #
+# Ambiguous — exact normalized string here returns None (unknown)
+# Defer to LLM and (post-join) OpenAlex.
+# ─────────────────────────────────────────────────────────────────────── #
+ambiguous:
+  - jfi                          # Journal of Financial Intermediation (academic)
+                                 # vs Journal of Fixed Income (practitioner)
+  - jof                          # could be Journal of Finance, Journal of Futures,
+                                 # Journal of Forecasting
+  - jbfa                         # Journal of Business Finance & Accounting — mixed
+
+  # Publishers — not journals. Could be academic books or practitioner trade.
+  - oxford university press
+  - princeton university press
+  - cambridge university press
+  - university of chicago press
+  - harvard business review press
+  - wiley
+  - john wiley and sons
+  - mcgraw hill
+  - elsevier
+  - palgrave macmillan
+  - springer
+
+  # Data/stats institutes — depends what's being cited (dataset vs report)
+  - insee                        # French national statistics institute
+  - bureau of labor statistics
+  - federal reserve bank         # different from working paper series below
+  - real estate finance          # generic name — could be academic journal,
+                                 # textbook, or firm commentary
+
+# ─────────────────────────────────────────────────────────────────────── #
+# Working-paper substrings — match anywhere in normalized venue string
+# Return None so the Phase 1.5 author-network check (pending) can classify.
+# ─────────────────────────────────────────────────────────────────────── #
+working_paper_patterns:
+  - working paper
+  - nber
+  - national bureau of economic research
+  - ssrn
+  - cepr
+  - fed working paper
+  - federal reserve
+  - boe working paper
+  - ecb working paper
+  - bis working paper
+  - discussion paper
+  - research paper series
+
+# ─────────────────────────────────────────────────────────────────────── #
+# Venue scope — orthogonal to is_academic. Finer-grained project-relevance
+# filter. Pure code derivation, no LLM.
+#
+# Defaults (when a venue is in academic or practitioner set but not listed
+# here): academic -> finance_adjacent; practitioner -> finance_practitioner.
+# Explicit entries below override the default.
+#
+# Scope values emitted by classify_venue_scope():
+#   finance_core          — benchmark journals measuring "the academic frontier"
+#                           this project is about. Most narrowly relevant.
+#   finance_adjacent      — academic, finance-flavored, but outside the frontier
+#                           (real estate finance, empirical finance not in
+#                           benchmark, etc.). DEFAULT for academic set.
+#   finance_practitioner  — practitioner finance (FAJ, AQR whites, etc.).
+#                           DEFAULT for practitioner set.
+#   non_finance_academic  — academic but outside finance entirely
+#                           (psychology, general economics).
+#   non_finance_other     — not academic, not finance practitioner
+#                           (media, data vendors, annual reports).
+#   None                  — unknown / defer.
+# ─────────────────────────────────────────────────────────────────────── #
+scopes:
+  finance_core:
+    # Benchmark journals (gap_structure.md §Academic Benchmark Journals)
+    - journal of finance
+    - journal of financial economics
+    - review of financial studies
+    - journal of financial and quantitative analysis
+    - review of finance
+    - journal of corporate finance
+    - journal of financial intermediation
+    - review of asset pricing studies
+    - review of corporate finance studies
+    - journal of banking and finance
+    - journal of financial markets
+
+  non_finance_academic:
+    # Psychology (APA journals cited in behavioral finance)
+    - journal of clinical psychology
+    - journal of consulting and clinical psychology
+    - journal of consulting psychology
+    # General economics (not specifically finance)
+    - journal of economic perspectives
+
+  non_finance_other:
+    # Financial press / media
+    - bloomberg
+    - wall street journal
+    - new york times
+    - fortune
+    # Data / index providers
+    - s and p dow jones indices
+    - ftse russell
+    # Annual reports / firm reference material
+    - berkshire hathaway
+    - berkshire hathaway inc annual report
+    # Non-finance firm reports
+    - credit foncier immobilier
+    - crédit foncier immobilier

@@ -1,0 +1,392 @@
+# GAP Project — Canonical Citation Patterns
+# Source of truth for canonical_scraper.py AND 01b_merge.py
+# ------------------------------------------------------------
+# v1.1 changes from v1.0 (adversarial review synthesis 2026-04-19):
+#   - FIX: sharpe_1964_capm regex — block possessive, hyphen, curly apostrophe
+#   - FIX: lsv_1994_contrarian regex — allow bibliography initials
+#   - FIX: brinson_1986_attribution regex — catch explicit year citations
+#   - FIX: amihud_2002_illiquidity regex — require proximity to year/measure
+#   - RENAME: shiller_cape → shiller_cape_metric (attribution clarification)
+#   - ADD: bollerslev_1986_garch (canonical_metric_ambiguous)
+#   - ADD: banz_1981_size (canonical)
+#   - ADD: black_litterman_1992 (canonical_metric_ambiguous)
+#   - ADD: asness_moskowitz_pedersen_2013 (canonical)
+# ------------------------------------------------------------
+# DEFERRED pending full-corpus scan (src/post_processing/full_corpus_scan.py):
+#   Grinold 1989, Merton 1974, Pastor-Stambaugh 2003, Frazzini-Pedersen BAB,
+#   Roll 1977 critique, Treynor 1965, Shleifer-Vishny 1997, Fama 1981,
+#   Campbell 1991, Cochrane 1996, Sortino, Jorion 1996 VaR.
+
+schema_version: canonical_v2
+yaml_version: 1.1
+last_updated: 2026-04-19
+
+patterns:
+
+  # ================================================================
+  # CAPM / Portfolio Theory
+  # ================================================================
+
+  - pattern_id: markowitz_1952_portfolio_selection
+    bucket: canonical
+    regex: '\bmarkowitz\b'
+    academic_subfield: portfolio_theory
+    paper:
+      authors: [Markowitz, H.]
+      year: 1952
+      title: Portfolio Selection
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1952.tb01525.x
+
+  - pattern_id: sharpe_1966_ratio
+    bucket: canonical_metric_ambiguous
+    regex: '\bsharpe\s+ratio\b'
+    academic_subfield: performance_measurement
+    paper:
+      authors: [Sharpe, W. F.]
+      year: 1966
+      title: Mutual Fund Performance
+      journal: Journal of Business
+      doi: 10.1086/294846
+
+  - pattern_id: sharpe_1964_capm
+    bucket: canonical
+    # v1.1 FIX: block "Sharpe's ratio" (ASCII + curly apostrophe), "Sharpe Ratio"
+    # with any whitespace, and "Sharpe-ratio" / "Sharpe—ratio" hyphen variants.
+    # The previous lookahead only blocked single-space + lowercase "ratio".
+    regex: "\\bsharpe\\b(?![\\s\\-\u2013\u2014]*['\u2019]?s?[\\s\\-\u2013\u2014]*(?:ratio|risk|measure))"
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Sharpe, W. F.]
+      year: 1964
+      title: Capital Asset Prices — A Theory of Market Equilibrium under Conditions of Risk
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1964.tb02865.x
+
+  - pattern_id: lintner_1965_capm
+    bucket: canonical
+    regex: '\blintner\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Lintner, J.]
+      year: 1965
+      title: The Valuation of Risk Assets and the Selection of Risky Investments in Stock Portfolios and Capital Budgets
+      journal: Review of Economics and Statistics
+      doi: 10.2307/1924119
+
+  - pattern_id: ross_1976_apt
+    bucket: canonical
+    regex: '\barbitrage\s+pricing\s+theory\b|\bross\s*\(1976\)'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Ross, S. A.]
+      year: 1976
+      title: The Arbitrage Theory of Capital Asset Pricing
+      journal: Journal of Economic Theory
+      doi: 10.1016/0022-0531(76)90046-6
+
+  # ================================================================
+  # Factor Models (order matters: most specific first)
+  # ================================================================
+
+  - pattern_id: fama_french_2015_five_factor
+    bucket: canonical
+    regex: '\bfama[-\s]+french\s+(?:five[-\s]+factor|5[-\s]*factor)\b|\bfama\s+and\s+french\s*\(2015\)'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Fama, E. F., French, K. R.]
+      year: 2015
+      title: A Five-Factor Asset Pricing Model
+      journal: Journal of Financial Economics
+      doi: 10.1016/j.jfineco.2014.10.010
+
+  - pattern_id: fama_french_1993_three_factor
+    bucket: canonical
+    regex: '\bfama[-\s]+french\s+(?:three[-\s]+factor|3[-\s]*factor)\b|\bfama\s+and\s+french\s*\(1993\)'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Fama, E. F., French, K. R.]
+      year: 1993
+      title: Common Risk Factors in the Returns on Stocks and Bonds
+      journal: Journal of Financial Economics
+      doi: 10.1016/0304-405X(93)90023-5
+
+  - pattern_id: fama_french_1992_cross_section
+    bucket: canonical
+    regex: '\bfama[-\s]+french\s*\(?1992\)?|\bfama\s+and\s+french\s+cross[-\s]+section\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Fama, E. F., French, K. R.]
+      year: 1992
+      title: The Cross-Section of Expected Stock Returns
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1992.tb04398.x
+
+  - pattern_id: carhart_1997_four_factor
+    bucket: canonical
+    regex: '\bcarhart\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Carhart, M. M.]
+      year: 1997
+      title: On Persistence in Mutual Fund Performance
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1997.tb03808.x
+
+  - pattern_id: jegadeesh_titman_1993
+    bucket: canonical
+    regex: '\bjegadeesh\b[^.]{0,50}?\btitman\b|\btitman\b[^.]{0,50}?\bjegadeesh\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Jegadeesh, N., Titman, S.]
+      year: 1993
+      title: Returns to Buying Winners and Selling Losers — Implications for Stock Market Efficiency
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1993.tb04702.x
+
+  - pattern_id: novy_marx_2013_profitability
+    bucket: canonical
+    regex: '\bnovy[-\s]marx\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Novy-Marx, R.]
+      year: 2013
+      title: The Other Side of Value — The Gross Profitability Premium
+      journal: Journal of Financial Economics
+      doi: 10.1016/j.jfineco.2013.01.003
+
+  - pattern_id: banz_1981_size
+    bucket: canonical
+    # v1.1 NEW. Canonical size-effect paper.
+    regex: '\bbanz\b\s*\(?1981\)?|\bbanz\b[^.]{0,30}?\b1981\b|\bbanz\b[^.]{0,50}?\bsize\s+effect\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Banz, R. W.]
+      year: 1981
+      title: The Relationship Between Return and Market Value of Common Stocks
+      journal: Journal of Financial Economics
+      doi: 10.1016/0304-405X(81)90018-0
+
+  - pattern_id: asness_moskowitz_pedersen_2013
+    bucket: canonical
+    # v1.1 NEW. Narrow pattern — requires full author trio or title phrase.
+    # NOT bare "Asness" (AQR self-citation noise).
+    regex: '\basness\b[^.]{0,80}?\bmoskowitz\b[^.]{0,80}?\bpedersen\b|\bvalue\s+and\s+momentum\s+everywhere\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Asness, C. S., Moskowitz, T. J., Pedersen, L. H.]
+      year: 2013
+      title: Value and Momentum Everywhere
+      journal: Journal of Finance
+      doi: 10.1111/jofi.12021
+    notes: |
+      NEW v1.1. Deliberately narrow. Bare "Asness" rejected as AQR self-citation
+      noise; this pattern captures only the full author trio or the title phrase,
+      which is one of the highest-cited factor-investing academic papers.
+
+  # ================================================================
+  # Market Efficiency / Anomalies
+  # ================================================================
+
+  - pattern_id: fama_1970_emh
+    bucket: canonical
+    regex: '\befficient\s+market(?:s)?\s+hypothesis\b|\bfama\s*\(1970\)'
+    academic_subfield: market_efficiency
+    paper:
+      authors: [Fama, E. F.]
+      year: 1970
+      title: Efficient Capital Markets — A Review of Theory and Empirical Work
+      journal: Journal of Finance
+      doi: 10.2307/2325486
+
+  - pattern_id: shiller_1981_excess_vol
+    bucket: canonical
+    regex: '\bshiller\b\s*\(?1981\)?|\bexcess\s+volatility\b'
+    academic_subfield: market_efficiency
+    paper:
+      authors: [Shiller, R. J.]
+      year: 1981
+      title: Do Stock Prices Move Too Much to be Justified by Subsequent Changes in Dividends?
+      journal: American Economic Review
+      doi: null
+
+  - pattern_id: shiller_cape_metric
+    bucket: canonical_metric_ambiguous
+    # v1.1 RENAMED from shiller_cape. Attribution nominally to Campbell-Shiller 1988
+    # but practitioner usage often references Shiller's popular work / online data.
+    # Regex deliberately avoids bare \bCAPE\b (false-positives "Cape Town").
+    regex: '\bCAPE\s+ratio\b|\bShiller\s+P/?E\b|\bcyclically[-\s]adjusted\s+P/?E\b'
+    academic_subfield: market_efficiency
+    paper:
+      authors: [Campbell, J. Y., Shiller, R. J.]
+      year: 1988
+      title: Stock Prices, Earnings, and Expected Dividends
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1988.tb04598.x
+    notes: |
+      v1.1. Practitioner CAPE references often point to Shiller's popular writing
+      or online data rather than the 1988 JF paper. Bucket B reflects that
+      citation intent is ambiguous; the flag `likely_metric_only` in 01b_merge.py
+      handles the overcount risk.
+
+  - pattern_id: lsv_1994_contrarian
+    bucket: canonical
+    # v1.1 FIX: allow bibliography initials between surnames.
+    # Previous regex broke on "Lakonishok, J., A. Shleifer, and R.W. Vishny".
+    regex: '\blakonishok\b[^.;]{0,50}?\bshleifer\b[^.;]{0,50}?\bvishny\b|\blsv\s*\(?1994\)?'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Lakonishok, J., Shleifer, A., Vishny, R. W.]
+      year: 1994
+      title: Contrarian Investment, Extrapolation, and Risk
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1994.tb04772.x
+    notes: |
+      v1.1: regex now accepts up to 50 chars between surnames to accommodate
+      initials and commas in bibliography entries. Still requires all three
+      names in order (so does not match Shleifer-Vishny 1997 alone).
+
+  # ================================================================
+  # Behavioral Finance
+  # ================================================================
+
+  - pattern_id: kahneman_tversky_1979_prospect
+    bucket: canonical
+    regex: '\bkahneman\s+(?:and|&|,\s*(?:and\s+)?[a-z]?\.?\s*)\s*tversky\b|\btversky\s+(?:and|&|,\s*(?:and\s+)?[a-z]?\.?\s*)\s*kahneman\b|\bprospect\s+theory\b|\bkahneman\s*\(1979\)'
+    academic_subfield: behavioral_finance
+    paper:
+      authors: [Kahneman, D., Tversky, A.]
+      year: 1979
+      title: "Prospect Theory — An Analysis of Decision under Risk"
+      journal: Econometrica
+      doi: 10.2307/1914185
+
+  # ================================================================
+  # Performance Measurement
+  # ================================================================
+
+  - pattern_id: jensen_1968_alpha
+    bucket: canonical_metric_ambiguous
+    regex: "\\bjensen(?:'s|\u2019s)?\\s+alpha\\b|\\bjensen\\s*\\(1968\\)"
+    academic_subfield: performance_measurement
+    paper:
+      authors: [Jensen, M. C.]
+      year: 1968
+      title: The Performance of Mutual Funds in the Period 1945-1964
+      journal: Journal of Finance
+      doi: 10.1111/j.1540-6261.1968.tb00815.x
+
+  - pattern_id: fama_macbeth_1973
+    bucket: canonical_metric_ambiguous
+    regex: '\bfama[-\s]+macbeth\b'
+    academic_subfield: asset_pricing
+    paper:
+      authors: [Fama, E. F., MacBeth, J. D.]
+      year: 1973
+      title: Risk, Return, and Equilibrium — Empirical Tests
+      journal: Journal of Political Economy
+      doi: 10.1086/260061
+
+  - pattern_id: brinson_1986_attribution
+    bucket: canonical_metric_ambiguous
+    # v1.1 FIX: add explicit year forms and looser compound acceptance.
+    # Still avoids bare \bbrinson\b (Gary Brinson appears in acknowledgements).
+    regex: '\bbrinson\b\s*(?:\(?1986\)?|\(?1991\)?|et\s+al\.?|attribution|and\s+(?:hood|fachler)|hood|,\s*(?:hood|fachler|beebower))\b|\bbrinson[-\s,]+hood[-\s,]+(?:and\s+|&\s+)?beebower\b|\bbrinson\s+model\b'
+    academic_subfield: performance_measurement
+    paper:
+      authors: [Brinson, G. P., Hood, L. R., Beebower, G. L.]
+      year: 1986
+      title: Determinants of Portfolio Performance
+      journal: Financial Analysts Journal
+      doi: 10.2469/faj.v42.n4.39
+
+  # ================================================================
+  # Derivatives
+  # ================================================================
+
+  - pattern_id: black_scholes_1973
+    bucket: canonical
+    regex: '\bblack[-\s]+scholes\b'
+    academic_subfield: derivatives
+    paper:
+      authors: [Black, F., Scholes, M.]
+      year: 1973
+      title: The Pricing of Options and Corporate Liabilities
+      journal: Journal of Political Economy
+      doi: 10.1086/260062
+
+  # ================================================================
+  # Corporate Finance
+  # ================================================================
+
+  - pattern_id: mm_1958_capital_structure
+    bucket: canonical
+    regex: '\bmodigliani[-\s]+miller\b|\bmiller[-\s]+modigliani\b|\bM\s*&\s*M\s+(?:theorem|\(1958\))'
+    academic_subfield: corporate_finance
+    paper:
+      authors: [Modigliani, F., Miller, M. H.]
+      year: 1958
+      title: The Cost of Capital, Corporation Finance and the Theory of Investment
+      journal: American Economic Review
+      doi: null
+
+  # ================================================================
+  # Microstructure / Liquidity
+  # ================================================================
+
+  - pattern_id: amihud_2002_illiquidity
+    bucket: canonical_metric_ambiguous
+    # v1.1 FIX: require proximity to year / illiquidity / measure tokens
+    # to avoid over-attributing Amihud & Mendelson 1986 and Amihud 1994.
+    regex: '\bamihud\b(?:[^.]{0,80}?\b(?:2002|illiquidity|illiq|liquidity\s+measure|ratio|measure)\b)|\bamihud\s*\(2002\)'
+    academic_subfield: market_microstructure
+    paper:
+      authors: [Amihud, Y.]
+      year: 2002
+      title: Illiquidity and Stock Returns — Cross-Section and Time-Series Effects
+      journal: Journal of Financial Markets
+      doi: 10.1016/S1386-4181(01)00024-6
+
+  # ================================================================
+  # Time Series / Volatility Modeling
+  # ================================================================
+
+  - pattern_id: bollerslev_1986_garch
+    bucket: canonical_metric_ambiguous
+    # v1.1 NEW. Unanimous adversarial review: GARCH is a method name
+    # practitioners use without citing Bollerslev 1986, exactly analogous
+    # to "Sharpe ratio" as metric-ambiguous.
+    regex: '\bGARCH\b|\bgeneralized\s+autoregressive\s+conditional\s+heteroske?dasticity\b'
+    academic_subfield: time_series_econometrics
+    paper:
+      authors: [Bollerslev, T.]
+      year: 1986
+      title: Generalized Autoregressive Conditional Heteroskedasticity
+      journal: Journal of Econometrics
+      doi: 10.1016/0304-4076(86)90063-1
+    notes: |
+      NEW v1.1. GARCH is used constantly as a method name in risk literature
+      (JOR corpus showed 34 hits in 2 docs in sample). Metric-ambiguous because
+      the practitioner using GARCH often doesn't cite the foundational paper.
+      Engle 1982 ARCH deferred to avoid false positives on bare "ARCH" token.
+
+  # ================================================================
+  # Asset Allocation
+  # ================================================================
+
+  - pattern_id: black_litterman_1992
+    bucket: canonical_metric_ambiguous
+    # v1.1 NEW. Practitioner-facing allocation model under-sampled in 150-doc
+    # sample. Metric-ambiguous because the model name is used generically.
+    regex: '\bblack[-\s]+litterman\b'
+    academic_subfield: portfolio_theory
+    paper:
+      authors: [Black, F., Litterman, R.]
+      year: 1992
+      title: Global Portfolio Optimization
+      journal: Financial Analysts Journal
+      doi: 10.2469/faj.v48.n5.28
+    notes: |
+      NEW v1.1. Foundational asset-allocation model used heavily in buy-side
+      practice. Classified metric-ambiguous because "Black-Litterman model"
+      is used as a method name without always citing the 1992 FAJ paper.
